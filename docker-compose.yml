@@ -1,0 +1,76 @@
+networks:
+  public-tier:
+    driver: bridge
+  secure-vault-tier:
+    internal: true
+
+services:
+  gatekeeper:
+    build: ./nginx
+    container_name: gatekeeper
+    ports:
+      - "80:80"
+    networks:
+      - public-tier
+    depends_on:
+      - frontend
+      - backend
+    restart: always
+
+  frontend:
+    build: ./frontend
+    deploy:
+      replicas: 2
+    networks:
+      - public-tier
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  backend:
+    build: ./backend
+    deploy:
+      replicas: 2
+    networks:
+      - public-tier
+      - secure-vault-tier
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://vault-db:5432/gradevault
+      SPRING_DATASOURCE_USERNAME: vault_admin
+      SPRING_DATASOURCE_PASSWORD: SuperSecurePassword2026!
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      vault-db:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  vault-db:
+    image: postgres:15-alpine
+    container_name: vault-db
+    networks:
+      - secure-vault-tier
+    environment:
+      POSTGRES_DB: gradevault
+      POSTGRES_USER: vault_admin
+      POSTGRES_PASSWORD: SuperSecurePassword2026!
+    volumes:
+      - vault_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vault_admin -d gradevault"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+volumes:
+  vault_postgres_data:
